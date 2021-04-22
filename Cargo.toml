@@ -1,0 +1,21 @@
+[package]
+name = "dma-buf"
+version = "0.1.0"
+authors = ["Maxime Ripard <maxime@cerno.tech>"]
+edition = "2018"
+description = "Linux DMA-Buf Abstraction Library"
+readme = "README.md"
+license-file = "LICENSE"
+keywords = ["linux", "dma", "dma-buf"]
+categories = ["api-bindings", "os::linux-apis"]
+repository = "https://github.com/mripard/dma-buf/"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libc = "~0.2"
+log = "~0.4"
+mmap = "~0.1"
+nix = "~0.20"
+thiserror = "~1.0"
