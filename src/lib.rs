@@ -49,13 +49,54 @@ pub enum Error {
 }
 
 /// A DMA-Buf buffer
+#[derive(Debug)]
 pub struct DmaBuf {
     fd: RawFd,
+}
+
+impl DmaBuf {
+    /// Maps a `DmaBuf` for the CPU to access it
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
+    /// fails.
+    pub fn memory_map(self) -> Result<MappedDmaBuf, Error> {
+        debug!("Mapping DMA-Buf buffer with File Descriptor {}", self.fd);
+
+        let stat = fstat(self.fd)?;
+        let len = stat.st_size.try_into().unwrap();
+        debug!("Valid buffer, size {}", len);
+
+        let mmap = MemoryMap::new(
+            len,
+            &[
+                MapOption::MapFd(self.fd),
+                MapOption::MapOffset(0),
+                MapOption::MapNonStandardFlags(libc::MAP_SHARED),
+                MapOption::MapReadable,
+                MapOption::MapWritable,
+            ],
+        )?;
+
+        debug!("Memory Mapping Done");
+
+        Ok(MappedDmaBuf {
+            buf: self,
+            len,
+            mmap,
+        })
+    }
+}
+
+/// A `DmaBuf` mapped in memory
+pub struct MappedDmaBuf {
+    buf: DmaBuf,
     len: usize,
     mmap: MemoryMap,
 }
 
-impl DmaBuf {
+impl MappedDmaBuf {
     /// Calls a closure to read the buffer content
     ///
     /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
@@ -76,7 +117,7 @@ impl DmaBuf {
 
         debug!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(self.fd)?;
+        dma_buf_begin_cpu_read_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
@@ -88,7 +129,7 @@ impl DmaBuf {
             debug!("Closure encountered an error")
         }
 
-        dma_buf_end_cpu_read_access(self.fd)?;
+        dma_buf_end_cpu_read_access(self.buf.fd)?;
 
         debug!("Buffer access done");
 
@@ -115,7 +156,7 @@ impl DmaBuf {
 
         debug!("Preparing the buffer for read/write access");
 
-        dma_buf_begin_cpu_readwrite_access(self.fd)?;
+        dma_buf_begin_cpu_readwrite_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
@@ -127,7 +168,7 @@ impl DmaBuf {
             debug!("Closure encountered an error")
         }
 
-        dma_buf_end_cpu_readwrite_access(self.fd)?;
+        dma_buf_end_cpu_readwrite_access(self.buf.fd)?;
 
         debug!("Buffer access done");
 
@@ -153,7 +194,7 @@ impl DmaBuf {
 
         debug!("Preparing the buffer for write access");
 
-        dma_buf_begin_cpu_write_access(self.fd)?;
+        dma_buf_begin_cpu_write_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
@@ -165,7 +206,7 @@ impl DmaBuf {
             debug!("Closure encountered an error")
         }
 
-        dma_buf_end_cpu_write_access(self.fd)?;
+        dma_buf_end_cpu_write_access(self.buf.fd)?;
 
         debug!("Buffer access done");
 
@@ -178,25 +219,7 @@ impl std::convert::TryFrom<RawFd> for DmaBuf {
 
     fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
         debug!("Importing DMABuf from File Descriptor {}", fd);
-
-        let stat = fstat(fd)?;
-        let len = stat.st_size.try_into().unwrap();
-        debug!("Valid buffer, size {}", len);
-
-        let mmap = MemoryMap::new(
-            len,
-            &[
-                MapOption::MapFd(fd),
-                MapOption::MapOffset(0),
-                MapOption::MapNonStandardFlags(libc::MAP_SHARED),
-                MapOption::MapReadable,
-                MapOption::MapWritable,
-            ],
-        )?;
-
-        debug!("Memory Mapping Done");
-
-        Ok(Self { fd, len, mmap })
+        Ok(Self { fd })
     }
 }
 
@@ -206,11 +229,18 @@ impl std::os::unix::io::AsRawFd for DmaBuf {
     }
 }
 
-impl std::fmt::Debug for DmaBuf {
+impl std::os::unix::io::AsRawFd for MappedDmaBuf {
+    fn as_raw_fd(&self) -> RawFd {
+        self.buf.fd
+    }
+}
+
+impl std::fmt::Debug for MappedDmaBuf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DMABuf")
-            .field("FD", &self.fd)
+        f.debug_struct("MappedDmaBuf")
+            .field("DmaBuf", &self.buf)
             .field("len", &self.len)
+            .field("address", &self.mmap.data())
             .finish()
     }
 }
