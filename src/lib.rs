@@ -19,7 +19,7 @@
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
 
-use std::{convert::TryInto, os::unix::io::RawFd, slice};
+use std::{convert::TryInto, num::TryFromIntError, os::unix::io::RawFd, slice};
 
 use ioctl::{
     dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
@@ -38,6 +38,10 @@ pub enum Error {
     /// An Error occured in the closure
     #[error("Closure Error")]
     Closure,
+
+    /// An Error occured when casting an integer
+    #[error("Integer Conversion Error")]
+    IntegerCast(#[from] TryFromIntError),
 
     /// An Error happened when allocating a buffer
     #[error("System Error")]
@@ -65,7 +69,7 @@ impl DmaBuf {
         debug!("Mapping DMA-Buf buffer with File Descriptor {}", self.fd);
 
         let stat = fstat(self.fd)?;
-        let len = stat.st_size.try_into().unwrap();
+        let len = stat.st_size.try_into()?;
         debug!("Valid buffer, size {}", len);
 
         let mmap = MemoryMap::new(
