@@ -214,15 +214,6 @@ impl MappedDmaBuf {
     }
 }
 
-impl std::convert::TryFrom<RawFd> for DmaBuf {
-    type Error = Error;
-
-    fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
-        debug!("Importing DMABuf from File Descriptor {}", fd);
-        Ok(Self { fd })
-    }
-}
-
 impl std::os::unix::io::AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
@@ -232,6 +223,13 @@ impl std::os::unix::io::AsRawFd for DmaBuf {
 impl std::os::unix::io::AsRawFd for MappedDmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.buf.fd
+    }
+}
+
+impl std::os::unix::io::FromRawFd for DmaBuf {
+    unsafe fn from_raw_fd(fd: RawFd) -> Self {
+        debug!("Importing DMABuf from File Descriptor {}", fd);
+        Self { fd }
     }
 }
 
