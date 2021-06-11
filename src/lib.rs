@@ -19,7 +19,7 @@
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
 
-use std::{convert::TryInto, num::TryFromIntError, os::unix::io::RawFd, slice};
+use std::{convert::TryInto, num::TryFromIntError, os::unix::io::RawFd};
 
 use ioctl::{
     dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
@@ -27,7 +27,7 @@ use ioctl::{
     dma_buf_end_cpu_write_access,
 };
 use log::debug;
-use mmap::{MapOption, MemoryMap};
+use memmap::MmapMut;
 use nix::sys::stat::fstat;
 
 mod ioctl;
@@ -48,8 +48,8 @@ pub enum Error {
     System(#[from] nix::Error),
 
     /// An Error occured when mapping the buffer
-    #[error("mmap Error")]
-    MMap(#[from] mmap::MapError),
+    #[error("Io Error")]
+    MMap(#[from] std::io::Error),
 }
 
 /// A DMA-Buf buffer
@@ -72,16 +72,7 @@ impl DmaBuf {
         let len = stat.st_size.try_into()?;
         debug!("Valid buffer, size {}", len);
 
-        let mmap = MemoryMap::new(
-            len,
-            &[
-                MapOption::MapFd(self.fd),
-                MapOption::MapOffset(0),
-                MapOption::MapNonStandardFlags(libc::MAP_SHARED),
-                MapOption::MapReadable,
-                MapOption::MapWritable,
-            ],
-        )?;
+        let mmap = unsafe { MmapMut::map_mut(self.fd)? };
 
         debug!("Memory Mapping Done");
 
@@ -97,7 +88,7 @@ impl DmaBuf {
 pub struct MappedDmaBuf {
     buf: DmaBuf,
     len: usize,
-    mmap: MemoryMap,
+    mmap: MmapMut,
 }
 
 impl MappedDmaBuf {
@@ -117,15 +108,13 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8]) -> Result<R, Error>,
     {
-        let slice = unsafe { slice::from_raw_parts(self.mmap.data(), self.len) };
-
         debug!("Preparing the buffer for read access");
 
         dma_buf_begin_cpu_read_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(slice);
+        let ret = f(&self.mmap);
 
         if ret.is_ok() {
             debug!("Closure done without error");
@@ -152,19 +141,17 @@ impl MappedDmaBuf {
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn readwrite<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, Error>
+    pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, Error>
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Error>,
     {
-        let slice = unsafe { slice::from_raw_parts_mut(self.mmap.data(), self.len) };
-
         debug!("Preparing the buffer for read/write access");
 
         dma_buf_begin_cpu_readwrite_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(slice, arg);
+        let ret = f(&mut self.mmap, arg);
 
         if ret.is_ok() {
             debug!("Closure done without error");
@@ -190,19 +177,17 @@ impl MappedDmaBuf {
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn write<A, F>(&self, f: F, arg: Option<A>) -> Result<(), Error>
+    pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), Error>
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Error>,
     {
-        let slice = unsafe { slice::from_raw_parts_mut(self.mmap.data(), self.len) };
-
         debug!("Preparing the buffer for write access");
 
         dma_buf_begin_cpu_write_access(self.buf.fd)?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(slice, arg);
+        let ret = f(&mut self.mmap, arg);
 
         if ret.is_ok() {
             debug!("Closure done without error");
@@ -242,7 +227,7 @@ impl std::fmt::Debug for MappedDmaBuf {
         f.debug_struct("MappedDmaBuf")
             .field("DmaBuf", &self.buf)
             .field("len", &self.len)
-            .field("address", &self.mmap.data())
+            .field("address", &self.mmap.as_ptr())
             .finish()
     }
 }
