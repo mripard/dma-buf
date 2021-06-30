@@ -104,9 +104,9 @@ impl MappedDmaBuf {
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn read<F, R>(&self, f: F) -> Result<R, Error>
+    pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, Error>
     where
-        F: Fn(&[u8]) -> Result<R, Error>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Error>,
     {
         debug!("Preparing the buffer for read access");
 
@@ -114,7 +114,7 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&self.mmap);
+        let ret = f(&self.mmap, arg);
 
         if ret.is_ok() {
             debug!("Closure done without error");
