@@ -119,7 +119,7 @@ impl MappedDmaBuf {
         if ret.is_ok() {
             debug!("Closure done without error");
         } else {
-            debug!("Closure encountered an error")
+            debug!("Closure encountered an error");
         }
 
         dma_buf_end_cpu_read_access(self.buf.fd)?;
@@ -156,7 +156,7 @@ impl MappedDmaBuf {
         if ret.is_ok() {
             debug!("Closure done without error");
         } else {
-            debug!("Closure encountered an error")
+            debug!("Closure encountered an error");
         }
 
         dma_buf_end_cpu_readwrite_access(self.buf.fd)?;
@@ -192,7 +192,7 @@ impl MappedDmaBuf {
         if ret.is_ok() {
             debug!("Closure done without error");
         } else {
-            debug!("Closure encountered an error")
+            debug!("Closure encountered an error");
         }
 
         dma_buf_end_cpu_write_access(self.buf.fd)?;
