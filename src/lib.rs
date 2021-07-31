@@ -1,14 +1,8 @@
 // Copyright 2020-2021, Cerno
 // Licensed under the MIT License
 // See the LICENSE file or <http://opensource.org/licenses/MIT>
-//
-//! # DMA-Buf Helper Library
-//!
-//! The DMA-Buf mechanism in Linux is aimed at providing a way for the user-space to efficiently
-//! share memory buffers between multiple devices, without any copy.
-//!
-//! This library provides a safe abstraction over this interface for Rust.
 
+#![doc = include_str!("../README.md")]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
