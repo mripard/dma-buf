@@ -13,7 +13,11 @@
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]
 
-use std::{convert::TryInto, num::TryFromIntError, os::unix::io::RawFd};
+use std::{
+    convert::TryInto,
+    num::TryFromIntError,
+    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+};
 
 use ioctl::{
     dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
@@ -49,7 +53,7 @@ pub enum Error {
 /// A DMA-Buf buffer
 #[derive(Debug)]
 pub struct DmaBuf {
-    fd: RawFd,
+    fd: OwnedFd,
 }
 
 impl DmaBuf {
@@ -60,13 +64,15 @@ impl DmaBuf {
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
     pub fn memory_map(self) -> Result<MappedDmaBuf, Error> {
-        debug!("Mapping DMA-Buf buffer with File Descriptor {}", self.fd);
+        let raw_fd = self.as_raw_fd();
 
-        let stat = fstat(self.fd)?;
+        debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.fd);
+
+        let stat = fstat(raw_fd)?;
         let len = stat.st_size.try_into()?;
         debug!("Valid buffer, size {}", len);
 
-        let mmap = unsafe { MmapMut::map_mut(self.fd)? };
+        let mmap = unsafe { MmapMut::map_mut(raw_fd)? };
 
         debug!("Memory Mapping Done");
 
@@ -102,9 +108,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8], Option<A>) -> Result<R, Error>,
     {
+        let raw_fd = self.as_raw_fd();
+
         debug!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(self.buf.fd)?;
+        dma_buf_begin_cpu_read_access(raw_fd)?;
 
         debug!("Accessing the buffer");
 
@@ -116,7 +124,7 @@ impl MappedDmaBuf {
             debug!("Closure encountered an error");
         }
 
-        dma_buf_end_cpu_read_access(self.buf.fd)?;
+        dma_buf_end_cpu_read_access(raw_fd)?;
 
         debug!("Buffer access done");
 
@@ -139,9 +147,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Error>,
     {
+        let raw_fd = self.as_raw_fd();
+
         debug!("Preparing the buffer for read/write access");
 
-        dma_buf_begin_cpu_readwrite_access(self.buf.fd)?;
+        dma_buf_begin_cpu_readwrite_access(raw_fd)?;
 
         debug!("Accessing the buffer");
 
@@ -153,7 +163,7 @@ impl MappedDmaBuf {
             debug!("Closure encountered an error");
         }
 
-        dma_buf_end_cpu_readwrite_access(self.buf.fd)?;
+        dma_buf_end_cpu_readwrite_access(raw_fd)?;
 
         debug!("Buffer access done");
 
@@ -175,9 +185,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Error>,
     {
+        let raw_fd = self.as_raw_fd();
+
         debug!("Preparing the buffer for write access");
 
-        dma_buf_begin_cpu_write_access(self.buf.fd)?;
+        dma_buf_begin_cpu_write_access(raw_fd)?;
 
         debug!("Accessing the buffer");
 
@@ -189,7 +201,7 @@ impl MappedDmaBuf {
             debug!("Closure encountered an error");
         }
 
-        dma_buf_end_cpu_write_access(self.buf.fd)?;
+        dma_buf_end_cpu_write_access(raw_fd)?;
 
         debug!("Buffer access done");
 
@@ -197,22 +209,30 @@ impl MappedDmaBuf {
     }
 }
 
+impl From<OwnedFd> for DmaBuf {
+    fn from(owned: OwnedFd) -> Self {
+        unsafe { Self::from_raw_fd(owned.into_raw_fd()) }
+    }
+}
+
 impl std::os::unix::io::AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd
+        self.fd.as_raw_fd()
     }
 }
 
 impl std::os::unix::io::AsRawFd for MappedDmaBuf {
     fn as_raw_fd(&self) -> RawFd {
-        self.buf.fd
+        self.buf.as_raw_fd()
     }
 }
 
 impl std::os::unix::io::FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
-        Self { fd }
+        Self {
+            fd: OwnedFd::from_raw_fd(fd),
+        }
     }
 }
 
@@ -223,12 +243,5 @@ impl std::fmt::Debug for MappedDmaBuf {
             .field("len", &self.len)
             .field("address", &self.mmap.as_ptr())
             .finish()
-    }
-}
-
-impl Drop for DmaBuf {
-    fn drop(&mut self) {
-        debug!("Closing buffer {}", self.fd);
-        nix::unistd::close(self.fd).unwrap();
     }
 }
