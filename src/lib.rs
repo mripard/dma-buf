@@ -31,8 +31,8 @@ mod ioctl;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// An Error occured in the closure
-    #[error("Closure Error")]
-    Closure,
+    #[error("Closure Error: {0}")]
+    Closure(Box<dyn std::error::Error>),
 
     /// An Error occured when casting an integer
     #[error("Integer Conversion Error")]
@@ -103,7 +103,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, Error>
     where
-        F: Fn(&[u8], Option<A>) -> Result<R, Error>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -113,13 +113,15 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&self.mmap, arg)
+            .map(|v| {
+                debug!("Closure done without error");
+                v
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                Error::Closure(e)
+            });
 
         dma_buf_end_cpu_read_access(raw_fd)?;
 
@@ -142,7 +144,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, Error>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Error>,
+        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -152,13 +154,15 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&mut self.mmap, arg)
+            .map(|v| {
+                debug!("Closure done without error");
+                v
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                Error::Closure(e)
+            });
 
         dma_buf_end_cpu_readwrite_access(raw_fd)?;
 
@@ -180,7 +184,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), Error>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Error>,
+        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -190,13 +194,14 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&mut self.mmap, arg)
+            .map(|_| {
+                debug!("Closure done without error");
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                Error::Closure(e)
+            });
 
         dma_buf_end_cpu_write_access(raw_fd)?;
 
