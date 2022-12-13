@@ -9,8 +9,6 @@
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 #![deny(clippy::cargo)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_sign_loss)]
 
 use std::{
     convert::TryInto,
