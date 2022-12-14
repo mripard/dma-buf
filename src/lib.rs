@@ -8,14 +8,10 @@
 #![warn(rust_2018_idioms)]
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
-#![deny(clippy::nursery)]
 #![deny(clippy::cargo)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_sign_loss)]
 
 use std::{
     convert::TryInto,
-    num::TryFromIntError,
     os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
 };
 
@@ -30,24 +26,28 @@ use nix::sys::stat::fstat;
 
 mod ioctl;
 
-/// Error Type for dma-buf
+/// Error type to map a [`DmaBuf`]
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    /// An Error occured in the closure
-    #[error("Closure Error")]
-    Closure,
+pub enum MapError {
+    /// An Error occured while accessing the buffer file descriptor
+    #[error("Could not access the buffer file descriptor: {reason}")]
+    FdAccess {
+        /// Description of the Error
+        reason: String,
 
-    /// An Error occured when casting an integer
-    #[error("Integer Conversion Error")]
-    IntegerCast(#[from] TryFromIntError),
+        /// Source of the Error
+        source: std::io::Error,
+    },
 
-    /// An Error happened when allocating a buffer
-    #[error("System Error")]
-    System(#[from] nix::Error),
+    /// An Error occured while mapping the buffer file descriptor
+    #[error("Could not map the buffer file descriptor: {reason}")]
+    MappingFailed {
+        /// Description of the Error
+        reason: String,
 
-    /// An Error occured when mapping the buffer
-    #[error("Io Error")]
-    MMap(#[from] std::io::Error),
+        /// Source of the Error
+        source: std::io::Error,
+    },
 }
 
 /// A DMA-Buf buffer
@@ -59,20 +59,31 @@ pub struct DmaBuf {
 impl DmaBuf {
     /// Maps a `DmaBuf` for the CPU to access it
     ///
+    /// # Panics
+    ///
+    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
+    ///
     /// # Errors
     ///
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
-    pub fn memory_map(self) -> Result<MappedDmaBuf, Error> {
+    pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
         let raw_fd = self.as_raw_fd();
 
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.fd);
 
-        let stat = fstat(raw_fd)?;
-        let len = stat.st_size.try_into()?;
+        let stat = fstat(raw_fd).map_err(|e| MapError::FdAccess {
+            reason: e.to_string(),
+            source: std::io::Error::from(e),
+        })?;
+
+        let len = stat.st_size.try_into().unwrap();
         debug!("Valid buffer, size {}", len);
 
-        let mmap = unsafe { MmapMut::map_mut(raw_fd)? };
+        let mmap = unsafe { MmapMut::map_mut(raw_fd) }.map_err(|e| MapError::MappingFailed {
+            reason: e.to_string(),
+            source: e,
+        })?;
 
         debug!("Memory Mapping Done");
 
@@ -91,6 +102,24 @@ pub struct MappedDmaBuf {
     mmap: MmapMut,
 }
 
+/// Error type to access a [`MappedDmaBuf`]
+#[derive(Debug, thiserror::Error)]
+pub enum BufferError {
+    /// An Error occured while accessing the buffer file descriptor
+    #[error("Could not access the buffer: {reason}")]
+    FdAccess {
+        /// Description of the Error
+        reason: String,
+
+        /// Source of the Error
+        source: std::io::Error,
+    },
+
+    /// An Error occured in the closure
+    #[error("The closure returned an error: {0}")]
+    Closure(Box<dyn std::error::Error>),
+}
+
 impl MappedDmaBuf {
     /// Calls a closure to read the buffer content
     ///
@@ -98,15 +127,14 @@ impl MappedDmaBuf {
     /// CPU access to a buffer in order to maintain the cache coherency. The closure will be run
     /// with those primitives called for a read access from the CPU.
     ///
-    /// The result of the closure will be returned on success. On failure, the closure must return
-    /// `Error::Closure`
+    /// The result of the closure will be returned.
     ///
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, Error>
+    pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&[u8], Option<A>) -> Result<R, Error>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -116,13 +144,15 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&self.mmap, arg)
+            .map(|v| {
+                debug!("Closure done without error");
+                v
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                BufferError::Closure(e)
+            });
 
         dma_buf_end_cpu_read_access(raw_fd)?;
 
@@ -143,9 +173,9 @@ impl MappedDmaBuf {
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, Error>
+    pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Error>,
+        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -155,13 +185,15 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&mut self.mmap, arg)
+            .map(|v| {
+                debug!("Closure done without error");
+                v
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                BufferError::Closure(e)
+            });
 
         dma_buf_end_cpu_readwrite_access(raw_fd)?;
 
@@ -181,9 +213,9 @@ impl MappedDmaBuf {
     /// # Errors
     ///
     /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), Error>
+    pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Error>,
+        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
     {
         let raw_fd = self.as_raw_fd();
 
@@ -193,13 +225,14 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg);
-
-        if ret.is_ok() {
-            debug!("Closure done without error");
-        } else {
-            debug!("Closure encountered an error");
-        }
+        let ret = f(&mut self.mmap, arg)
+            .map(|_| {
+                debug!("Closure done without error");
+            })
+            .map_err(|e| {
+                debug!("Closure encountered an error {}", e);
+                BufferError::Closure(e)
+            });
 
         dma_buf_end_cpu_write_access(raw_fd)?;
 
