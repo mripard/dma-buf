@@ -12,7 +12,6 @@
 
 use std::{
     convert::TryInto,
-    num::TryFromIntError,
     os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
 };
 
@@ -34,10 +33,6 @@ pub enum Error {
     #[error("Closure Error: {0}")]
     Closure(Box<dyn std::error::Error>),
 
-    /// An Error occured when casting an integer
-    #[error("Integer Conversion Error")]
-    IntegerCast(#[from] TryFromIntError),
-
     /// An Error happened when allocating a buffer
     #[error("System Error")]
     System(#[from] nix::Error),
@@ -56,6 +51,10 @@ pub struct DmaBuf {
 impl DmaBuf {
     /// Maps a `DmaBuf` for the CPU to access it
     ///
+    /// # Panics
+    ///
+    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
+    ///
     /// # Errors
     ///
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
@@ -66,7 +65,7 @@ impl DmaBuf {
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.fd);
 
         let stat = fstat(raw_fd)?;
-        let len = stat.st_size.try_into()?;
+        let len = stat.st_size.try_into().unwrap();
         debug!("Valid buffer, size {}", len);
 
         let mmap = unsafe { MmapMut::map_mut(raw_fd)? };
