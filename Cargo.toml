@@ -14,5 +14,5 @@ repository = "https://github.com/mripard/dma-buf/"
 libc = "0.2.137"
 log = "0.4.17"
 memmap = { package = "memmap2", version = "0.5.8" }
-nix = "0.26.1"
+nix = "0.27.0"
 thiserror = "1.0.37"
