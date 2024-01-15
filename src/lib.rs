@@ -226,7 +226,7 @@ impl MappedDmaBuf {
         debug!("Accessing the buffer");
 
         let ret = f(&mut self.mmap, arg)
-            .map(|_| {
+            .map(|()| {
                 debug!("Closure done without error");
             })
             .map_err(|e| {
