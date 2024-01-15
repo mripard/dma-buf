@@ -1,6 +1,6 @@
 [package]
 name = "dma-buf"
-version = "0.2.1-alpha.0"
+version = "0.2.1"
 authors = ["Maxime Ripard <maxime@cerno.tech>"]
 edition = "2021"
 description = "Linux DMA-Buf Abstraction Library"
