@@ -52,9 +52,7 @@ pub enum MapError {
 
 /// A DMA-Buf buffer
 #[derive(Debug)]
-pub struct DmaBuf {
-    fd: OwnedFd,
-}
+pub struct DmaBuf(OwnedFd);
 
 impl DmaBuf {
     /// Maps a `DmaBuf` for the CPU to access it
@@ -70,7 +68,7 @@ impl DmaBuf {
     pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
         let raw_fd = self.as_raw_fd();
 
-        debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.fd);
+        debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
         let stat = fstat(raw_fd).map_err(|e| MapError::FdAccess {
             reason: e.to_string(),
@@ -250,7 +248,7 @@ impl From<OwnedFd> for DmaBuf {
 
 impl std::os::unix::io::AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
+        self.0.as_raw_fd()
     }
 }
 
@@ -263,9 +261,8 @@ impl std::os::unix::io::AsRawFd for MappedDmaBuf {
 impl std::os::unix::io::FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
-        Self {
-            fd: OwnedFd::from_raw_fd(fd),
-        }
+
+        Self(OwnedFd::from_raw_fd(fd))
     }
 }
 
