@@ -132,11 +132,9 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(raw_fd)?;
+        dma_buf_begin_cpu_read_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
@@ -150,7 +148,7 @@ impl MappedDmaBuf {
                 BufferError::Closure(e)
             });
 
-        dma_buf_end_cpu_read_access(raw_fd)?;
+        dma_buf_end_cpu_read_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
@@ -173,11 +171,9 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for read/write access");
 
-        dma_buf_begin_cpu_readwrite_access(raw_fd)?;
+        dma_buf_begin_cpu_readwrite_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
@@ -191,7 +187,7 @@ impl MappedDmaBuf {
                 BufferError::Closure(e)
             });
 
-        dma_buf_end_cpu_readwrite_access(raw_fd)?;
+        dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
@@ -213,11 +209,9 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for write access");
 
-        dma_buf_begin_cpu_write_access(raw_fd)?;
+        dma_buf_begin_cpu_write_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
@@ -230,7 +224,7 @@ impl MappedDmaBuf {
                 BufferError::Closure(e)
             });
 
-        dma_buf_end_cpu_write_access(raw_fd)?;
+        dma_buf_end_cpu_write_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
