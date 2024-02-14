@@ -13,7 +13,7 @@
 use core::fmt;
 use std::{
     convert::TryInto,
-    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+    os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd},
 };
 
 use ioctl::{
@@ -243,7 +243,7 @@ impl MappedDmaBuf {
 
 impl From<OwnedFd> for DmaBuf {
     fn from(owned: OwnedFd) -> Self {
-        unsafe { Self::from_raw_fd(owned.into_raw_fd()) }
+        Self(owned)
     }
 }
 
