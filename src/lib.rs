@@ -13,10 +13,7 @@
 use core::fmt;
 use std::{
     convert::TryInto,
-    os::{
-        fd::{AsFd, BorrowedFd},
-        unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd},
-    },
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
 };
 
 use ioctl::{
