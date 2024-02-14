@@ -20,7 +20,7 @@ use ioctl::{
 };
 use log::debug;
 use memmap::MmapMut;
-use nix::sys::stat::fstat;
+use rustix::fs::fstat;
 
 mod ioctl;
 
@@ -68,7 +68,7 @@ impl DmaBuf {
 
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
-        let stat = fstat(raw_fd).map_err(|e| MapError::FdAccess {
+        let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
             reason: e.to_string(),
             source: std::io::Error::from(e),
         })?;
