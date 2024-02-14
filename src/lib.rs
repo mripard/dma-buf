@@ -10,11 +10,8 @@
 #![deny(clippy::pedantic)]
 #![deny(clippy::cargo)]
 
-use core::fmt;
-use std::{
-    convert::TryInto,
-    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
-};
+use core::{convert::TryInto, fmt};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
 use ioctl::{
     dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
