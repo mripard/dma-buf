@@ -117,6 +117,14 @@ pub enum BufferError {
 }
 
 impl MappedDmaBuf {
+    fn as_slice(&self) -> &[u8] {
+        &self.mmap
+    }
+
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        &mut self.mmap
+    }
+
     /// Calls a closure to read the buffer content
     ///
     /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
@@ -138,15 +146,19 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&self.mmap, arg)
-            .map(|v| {
-                debug!("Closure done without error");
-                v
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice();
+
+            f(bytes, arg)
+                .map(|v| {
+                    debug!("Closure done without error");
+                    v
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
 
         dma_buf_end_cpu_read_access(self.buf.as_fd())?;
 
@@ -177,15 +189,19 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg)
-            .map(|v| {
-                debug!("Closure done without error");
-                v
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice_mut();
+
+            f(bytes, arg)
+                .map(|v| {
+                    debug!("Closure done without error");
+                    v
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
 
         dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
 
@@ -215,14 +231,18 @@ impl MappedDmaBuf {
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg)
-            .map(|()| {
-                debug!("Closure done without error");
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice_mut();
+
+            f(bytes, arg)
+                .map(|()| {
+                    debug!("Closure done without error");
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
 
         dma_buf_end_cpu_write_access(self.buf.as_fd())?;
 
