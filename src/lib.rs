@@ -10,6 +10,7 @@
 #![deny(clippy::pedantic)]
 #![deny(clippy::cargo)]
 
+use core::fmt;
 use std::{
     convert::TryInto,
     os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
@@ -246,19 +247,19 @@ impl From<OwnedFd> for DmaBuf {
     }
 }
 
-impl std::os::unix::io::AsRawFd for DmaBuf {
+impl AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
     }
 }
 
-impl std::os::unix::io::AsRawFd for MappedDmaBuf {
+impl AsRawFd for MappedDmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.buf.as_raw_fd()
     }
 }
 
-impl std::os::unix::io::FromRawFd for DmaBuf {
+impl FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
 
@@ -266,8 +267,8 @@ impl std::os::unix::io::FromRawFd for DmaBuf {
     }
 }
 
-impl std::fmt::Debug for MappedDmaBuf {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for MappedDmaBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MappedDmaBuf")
             .field("DmaBuf", &self.buf)
             .field("len", &self.len)
