@@ -13,7 +13,10 @@
 use core::fmt;
 use std::{
     convert::TryInto,
-    os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+    os::{
+        fd::{AsFd, BorrowedFd},
+        unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+    },
 };
 
 use ioctl::{
@@ -247,9 +250,21 @@ impl From<OwnedFd> for DmaBuf {
     }
 }
 
+impl AsFd for DmaBuf {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
 impl AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
+    }
+}
+
+impl AsFd for MappedDmaBuf {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.buf.as_fd()
     }
 }
 
