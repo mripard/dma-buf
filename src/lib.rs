@@ -29,7 +29,7 @@ mod ioctl;
 /// Error type to map a [`DmaBuf`]
 #[derive(thiserror::Error, Debug)]
 pub enum MapError {
-    /// An Error occured while accessing the buffer file descriptor
+    /// An Error occurred while accessing the buffer file descriptor
     #[error("Could not access the buffer file descriptor: {reason}")]
     FdAccess {
         /// Description of the Error
@@ -39,7 +39,7 @@ pub enum MapError {
         source: std::io::Error,
     },
 
-    /// An Error occured while mapping the buffer file descriptor
+    /// An Error occurred while mapping the buffer file descriptor
     #[error("Could not map the buffer file descriptor: {reason}")]
     MappingFailed {
         /// Description of the Error
