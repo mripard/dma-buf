@@ -11,7 +11,6 @@ categories = ["api-bindings", "os::linux-apis"]
 repository = "https://github.com/mripard/dma-buf/"
 
 [dependencies]
-libc = "0.2.152"
 log = "0.4.20"
 memmap = { package = "memmap2", version = "0.9.3" }
 nix = { version = "0.27.1", features = ["ioctl", "fs"] }
