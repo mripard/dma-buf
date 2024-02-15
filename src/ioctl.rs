@@ -17,7 +17,7 @@ const DMA_BUF_SYNC_END: u64 = 1 << 2;
 
 #[derive(Default)]
 #[repr(C)]
-pub struct dma_buf_sync {
+struct dma_buf_sync {
     flags: u64,
 }
 
@@ -43,32 +43,32 @@ fn dma_buf_sync(fd: BorrowedFd<'_>, flags: u64) -> Result<(), BufferError> {
     })
 }
 
-pub fn dma_buf_begin_cpu_read_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_begin_cpu_read_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ)
 }
 
-pub fn dma_buf_begin_cpu_readwrite_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_begin_cpu_readwrite_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(
         fd,
         DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE | DMA_BUF_SYNC_READ,
     )
 }
 
-pub fn dma_buf_begin_cpu_write_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_begin_cpu_write_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE)
 }
 
-pub fn dma_buf_end_cpu_read_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_end_cpu_read_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ)
 }
 
-pub fn dma_buf_end_cpu_readwrite_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_end_cpu_readwrite_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(
         fd,
         DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE | DMA_BUF_SYNC_READ,
     )
 }
 
-pub fn dma_buf_end_cpu_write_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
+pub(crate) fn dma_buf_end_cpu_write_access(fd: BorrowedFd<'_>) -> Result<(), BufferError> {
     dma_buf_sync(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE)
 }
