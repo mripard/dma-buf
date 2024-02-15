@@ -40,6 +40,7 @@ use ioctl::{
 };
 
 /// Error type to map a [`DmaBuf`]
+#[non_exhaustive]
 #[derive(thiserror::Error, Debug)]
 pub enum MapError {
     /// An Error occurred while accessing the buffer file descriptor
