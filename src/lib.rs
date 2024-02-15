@@ -10,7 +10,7 @@
 #![deny(clippy::pedantic)]
 #![deny(clippy::cargo)]
 
-use core::{ffi::c_void, fmt, ptr, slice};
+use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
 use log::{debug, warn};
@@ -49,6 +49,10 @@ pub enum MapError {
         /// Source of the Error
         source: std::io::Error,
     },
+
+    /// An Error occurred while converting between Integer types
+    #[error("Integer Conversion Error")]
+    IntegerConversionFailed(#[from] TryFromIntError),
 }
 
 /// A DMA-Buf buffer
@@ -74,9 +78,7 @@ impl DmaBuf {
             source: std::io::Error::from(e),
         })?;
 
-        let len = usize::try_from(stat.st_size)
-            .unwrap()
-            .next_multiple_of(page_size());
+        let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
         debug!("Valid buffer, size {}", len);
 
         // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
