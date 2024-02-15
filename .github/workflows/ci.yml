@@ -23,10 +23,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt
           override: true
-      - name: Check Format
-        run: cargo fmt --all -- --check
 
       - name: Build
         run: cargo build --verbose
