@@ -310,7 +310,9 @@ impl FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
 
-        Self(OwnedFd::from_raw_fd(fd))
+        // SAFETY: We're just forwarding the FromRawFd implementation to our inner OwnerFd type.
+        // We're having exactly the same safety guarantees.
+        Self(unsafe { OwnedFd::from_raw_fd(fd) })
     }
 }
 
