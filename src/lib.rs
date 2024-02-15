@@ -2,34 +2,47 @@
 // Licensed under the MIT License
 // See the LICENSE file or <http://opensource.org/licenses/MIT>
 
+#![cfg_attr(
+    feature = "nightly",
+    feature(
+        type_privacy_lints,
+        non_exhaustive_omitted_patterns_lint,
+        strict_provenance
+    )
+)]
+#![cfg_attr(
+    feature = "nightly",
+    warn(
+        fuzzy_provenance_casts,
+        lossy_provenance_casts,
+        unnameable_types,
+        non_exhaustive_omitted_patterns,
+        clippy::empty_enum_variants_with_brackets
+    )
+)]
 #![doc = include_str!("../README.md")]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-#![warn(rust_2018_idioms)]
-#![deny(clippy::all)]
-#![deny(clippy::pedantic)]
-#![deny(clippy::cargo)]
 
-use std::{
-    convert::TryInto,
-    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+
+use log::{debug, warn};
+use rustix::{
+    fs::fstat,
+    mm::{mmap, munmap, MapFlags, ProtFlags},
+    param::page_size,
 };
 
+mod ioctl;
 use ioctl::{
     dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
     dma_buf_begin_cpu_write_access, dma_buf_end_cpu_read_access, dma_buf_end_cpu_readwrite_access,
     dma_buf_end_cpu_write_access,
 };
-use log::debug;
-use memmap::MmapMut;
-use nix::sys::stat::fstat;
-
-mod ioctl;
 
 /// Error type to map a [`DmaBuf`]
 #[derive(thiserror::Error, Debug)]
 pub enum MapError {
-    /// An Error occured while accessing the buffer file descriptor
+    /// An Error occurred while accessing the buffer file descriptor
     #[error("Could not access the buffer file descriptor: {reason}")]
     FdAccess {
         /// Description of the Error
@@ -39,7 +52,7 @@ pub enum MapError {
         source: std::io::Error,
     },
 
-    /// An Error occured while mapping the buffer file descriptor
+    /// An Error occurred while mapping the buffer file descriptor
     #[error("Could not map the buffer file descriptor: {reason}")]
     MappingFailed {
         /// Description of the Error
@@ -48,13 +61,15 @@ pub enum MapError {
         /// Source of the Error
         source: std::io::Error,
     },
+
+    /// An Error occurred while converting between Integer types
+    #[error("Integer Conversion Error")]
+    IntegerConversionFailed(#[from] TryFromIntError),
 }
 
 /// A DMA-Buf buffer
 #[derive(Debug)]
-pub struct DmaBuf {
-    fd: OwnedFd,
-}
+pub struct DmaBuf(OwnedFd);
 
 impl DmaBuf {
     /// Maps a `DmaBuf` for the CPU to access it
@@ -68,21 +83,32 @@ impl DmaBuf {
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
     pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
-        let raw_fd = self.as_raw_fd();
+        debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
-        debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.fd);
-
-        let stat = fstat(raw_fd).map_err(|e| MapError::FdAccess {
+        let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
             reason: e.to_string(),
             source: std::io::Error::from(e),
         })?;
 
-        let len = stat.st_size.try_into().unwrap();
-        debug!("Valid buffer, size {}", len);
+        let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
+        debug!("Valid buffer, size {len}");
 
-        let mmap = unsafe { MmapMut::map_mut(raw_fd) }.map_err(|e| MapError::MappingFailed {
+        // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
+        // our fd is valid and the length is aligned, so that's something.
+        let mapping_ptr = unsafe {
+            mmap(
+                ptr::null_mut(),
+                len,
+                ProtFlags::READ | ProtFlags::WRITE,
+                MapFlags::SHARED,
+                &self.0,
+                0,
+            )
+        }
+        .map(<*mut c_void>::cast::<u8>)
+        .map_err(|e| MapError::MappingFailed {
             reason: e.to_string(),
-            source: e,
+            source: std::io::Error::from(e),
         })?;
 
         debug!("Memory Mapping Done");
@@ -90,7 +116,7 @@ impl DmaBuf {
         Ok(MappedDmaBuf {
             buf: self,
             len,
-            mmap,
+            mmap: mapping_ptr,
         })
     }
 }
@@ -99,7 +125,7 @@ impl DmaBuf {
 pub struct MappedDmaBuf {
     buf: DmaBuf,
     len: usize,
-    mmap: MmapMut,
+    mmap: *mut u8,
 }
 
 /// Error type to access a [`MappedDmaBuf`]
@@ -121,6 +147,20 @@ pub enum BufferError {
 }
 
 impl MappedDmaBuf {
+    fn as_slice(&self) -> &[u8] {
+        // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
+        // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
+        // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
+        unsafe { slice::from_raw_parts(self.mmap, self.len) }
+    }
+
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
+        // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
+        // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
+        unsafe { slice::from_raw_parts_mut(self.mmap, self.len) }
+    }
+
     /// Calls a closure to read the buffer content
     ///
     /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
@@ -136,25 +176,27 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(raw_fd)?;
+        dma_buf_begin_cpu_read_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(&self.mmap, arg)
-            .map(|v| {
-                debug!("Closure done without error");
-                v
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice();
 
-        dma_buf_end_cpu_read_access(raw_fd)?;
+            f(bytes, arg)
+                .map(|v| {
+                    debug!("Closure done without error");
+                    v
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
+
+        dma_buf_end_cpu_read_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
@@ -177,25 +219,27 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for read/write access");
 
-        dma_buf_begin_cpu_readwrite_access(raw_fd)?;
+        dma_buf_begin_cpu_readwrite_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg)
-            .map(|v| {
-                debug!("Closure done without error");
-                v
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice_mut();
 
-        dma_buf_end_cpu_readwrite_access(raw_fd)?;
+            f(bytes, arg)
+                .map(|v| {
+                    debug!("Closure done without error");
+                    v
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
+
+        dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
@@ -217,24 +261,26 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
     {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Preparing the buffer for write access");
 
-        dma_buf_begin_cpu_write_access(raw_fd)?;
+        dma_buf_begin_cpu_write_access(self.buf.as_fd())?;
 
         debug!("Accessing the buffer");
 
-        let ret = f(&mut self.mmap, arg)
-            .map(|()| {
-                debug!("Closure done without error");
-            })
-            .map_err(|e| {
-                debug!("Closure encountered an error {}", e);
-                BufferError::Closure(e)
-            });
+        let ret = {
+            let bytes = self.as_slice_mut();
 
-        dma_buf_end_cpu_write_access(raw_fd)?;
+            f(bytes, arg)
+                .map(|()| {
+                    debug!("Closure done without error");
+                })
+                .map_err(|e| {
+                    debug!("Closure encountered an error {}", e);
+                    BufferError::Closure(e)
+                })
+        };
+
+        dma_buf_end_cpu_write_access(self.buf.as_fd())?;
 
         debug!("Buffer access done");
 
@@ -244,37 +290,60 @@ impl MappedDmaBuf {
 
 impl From<OwnedFd> for DmaBuf {
     fn from(owned: OwnedFd) -> Self {
-        unsafe { Self::from_raw_fd(owned.into_raw_fd()) }
+        Self(owned)
     }
 }
 
-impl std::os::unix::io::AsRawFd for DmaBuf {
+impl AsFd for DmaBuf {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl AsRawFd for DmaBuf {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
+        self.0.as_raw_fd()
     }
 }
 
-impl std::os::unix::io::AsRawFd for MappedDmaBuf {
+impl AsFd for MappedDmaBuf {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.buf.as_fd()
+    }
+}
+
+impl AsRawFd for MappedDmaBuf {
     fn as_raw_fd(&self) -> RawFd {
         self.buf.as_raw_fd()
     }
 }
 
-impl std::os::unix::io::FromRawFd for DmaBuf {
+impl FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
-        Self {
-            fd: OwnedFd::from_raw_fd(fd),
-        }
+
+        // SAFETY: We're just forwarding the FromRawFd implementation to our inner OwnerFd type.
+        // We're having exactly the same safety guarantees.
+        Self(unsafe { OwnedFd::from_raw_fd(fd) })
     }
 }
 
-impl std::fmt::Debug for MappedDmaBuf {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for MappedDmaBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MappedDmaBuf")
             .field("DmaBuf", &self.buf)
             .field("len", &self.len)
-            .field("address", &self.mmap.as_ptr())
+            .field("address", &self.mmap)
             .finish()
+    }
+}
+
+impl Drop for MappedDmaBuf {
+    fn drop(&mut self) {
+        // SAFETY: It's not clear what rustix expects from a safety perspective, but our pointer is
+        // valid, and is a void pointer at least.
+        if unsafe { munmap(self.mmap.cast::<c_void>(), self.len) }.is_err() {
+            warn!("unmap failed!");
+        }
     }
 }
