@@ -79,7 +79,7 @@ impl DmaBuf {
         })?;
 
         let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
-        debug!("Valid buffer, size {}", len);
+        debug!("Valid buffer, size {len}");
 
         // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
         // our fd is valid and the length is aligned, so that's something.
