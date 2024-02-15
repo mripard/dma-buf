@@ -10,7 +10,7 @@
 #![deny(clippy::pedantic)]
 #![deny(clippy::cargo)]
 
-use core::{convert::TryInto, fmt};
+use core::{ffi::c_void, fmt, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
 use ioctl::{
@@ -18,9 +18,12 @@ use ioctl::{
     dma_buf_begin_cpu_write_access, dma_buf_end_cpu_read_access, dma_buf_end_cpu_readwrite_access,
     dma_buf_end_cpu_write_access,
 };
-use log::debug;
-use memmap::MmapMut;
-use rustix::fs::fstat;
+use log::{debug, warn};
+use rustix::{
+    fs::fstat,
+    mm::{mmap, munmap, MapFlags, ProtFlags},
+    param::page_size,
+};
 
 mod ioctl;
 
@@ -64,8 +67,6 @@ impl DmaBuf {
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
     pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
-        let raw_fd = self.as_raw_fd();
-
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
         let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
@@ -73,12 +74,27 @@ impl DmaBuf {
             source: std::io::Error::from(e),
         })?;
 
-        let len = stat.st_size.try_into().unwrap();
+        let len = usize::try_from(stat.st_size)
+            .unwrap()
+            .next_multiple_of(page_size());
         debug!("Valid buffer, size {}", len);
 
-        let mmap = unsafe { MmapMut::map_mut(raw_fd) }.map_err(|e| MapError::MappingFailed {
+        // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
+        // our fd is valid and the length is aligned, so that's something.
+        let mapping_ptr = unsafe {
+            mmap(
+                ptr::null_mut(),
+                len,
+                ProtFlags::READ | ProtFlags::WRITE,
+                MapFlags::SHARED,
+                &self.0,
+                0,
+            )
+        }
+        .map(<*mut c_void>::cast::<u8>)
+        .map_err(|e| MapError::MappingFailed {
             reason: e.to_string(),
-            source: e,
+            source: std::io::Error::from(e),
         })?;
 
         debug!("Memory Mapping Done");
@@ -86,7 +102,7 @@ impl DmaBuf {
         Ok(MappedDmaBuf {
             buf: self,
             len,
-            mmap,
+            mmap: mapping_ptr,
         })
     }
 }
@@ -95,7 +111,7 @@ impl DmaBuf {
 pub struct MappedDmaBuf {
     buf: DmaBuf,
     len: usize,
-    mmap: MmapMut,
+    mmap: *mut u8,
 }
 
 /// Error type to access a [`MappedDmaBuf`]
@@ -118,11 +134,17 @@ pub enum BufferError {
 
 impl MappedDmaBuf {
     fn as_slice(&self) -> &[u8] {
-        &self.mmap
+        // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
+        // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
+        // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
+        unsafe { slice::from_raw_parts(self.mmap, self.len) }
     }
 
     fn as_slice_mut(&mut self) -> &mut [u8] {
-        &mut self.mmap
+        // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
+        // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
+        // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
+        unsafe { slice::from_raw_parts_mut(self.mmap, self.len) }
     }
 
     /// Calls a closure to read the buffer content
@@ -295,7 +317,17 @@ impl fmt::Debug for MappedDmaBuf {
         f.debug_struct("MappedDmaBuf")
             .field("DmaBuf", &self.buf)
             .field("len", &self.len)
-            .field("address", &self.mmap.as_ptr())
+            .field("address", &self.mmap)
             .finish()
+    }
+}
+
+impl Drop for MappedDmaBuf {
+    fn drop(&mut self) {
+        // SAFETY: It's not clear what rustix expects from a safety perspective, but our pointer is
+        // valid, and is a void pointer at least.
+        if unsafe { munmap(self.mmap.cast::<c_void>(), self.len) }.is_err() {
+            warn!("unmap failed!");
+        }
     }
 }

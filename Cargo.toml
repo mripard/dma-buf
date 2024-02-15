@@ -12,6 +12,5 @@ repository = "https://github.com/mripard/dma-buf/"
 
 [dependencies]
 log = "0.4.20"
-memmap = { package = "memmap2", version = "0.9.3" }
-rustix = { version = "0.38.31", features = ["fs"] }
+rustix = { version = "0.38.31", features = ["fs", "mm", "param"] }
 thiserror = "1.0.56"
