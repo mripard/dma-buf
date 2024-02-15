@@ -13,11 +13,6 @@
 use core::{ffi::c_void, fmt, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-use ioctl::{
-    dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
-    dma_buf_begin_cpu_write_access, dma_buf_end_cpu_read_access, dma_buf_end_cpu_readwrite_access,
-    dma_buf_end_cpu_write_access,
-};
 use log::{debug, warn};
 use rustix::{
     fs::fstat,
@@ -26,6 +21,11 @@ use rustix::{
 };
 
 mod ioctl;
+use ioctl::{
+    dma_buf_begin_cpu_read_access, dma_buf_begin_cpu_readwrite_access,
+    dma_buf_begin_cpu_write_access, dma_buf_end_cpu_read_access, dma_buf_end_cpu_readwrite_access,
+    dma_buf_end_cpu_write_access,
+};
 
 /// Error type to map a [`DmaBuf`]
 #[derive(thiserror::Error, Debug)]
