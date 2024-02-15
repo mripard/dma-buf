@@ -2,13 +2,25 @@
 // Licensed under the MIT License
 // See the LICENSE file or <http://opensource.org/licenses/MIT>
 
+#![cfg_attr(
+    feature = "nightly",
+    feature(
+        type_privacy_lints,
+        non_exhaustive_omitted_patterns_lint,
+        strict_provenance
+    )
+)]
+#![cfg_attr(
+    feature = "nightly",
+    warn(
+        fuzzy_provenance_casts,
+        lossy_provenance_casts,
+        unnameable_types,
+        non_exhaustive_omitted_patterns,
+        clippy::empty_enum_variants_with_brackets
+    )
+)]
 #![doc = include_str!("../README.md")]
-#![warn(missing_debug_implementations)]
-#![warn(missing_docs)]
-#![warn(rust_2018_idioms)]
-#![deny(clippy::all)]
-#![deny(clippy::pedantic)]
-#![deny(clippy::cargo)]
 
 use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
