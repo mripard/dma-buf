@@ -73,17 +73,7 @@ pub enum MapError {
 pub struct DmaBuf(OwnedFd);
 
 impl DmaBuf {
-    /// Maps a `DmaBuf` for the CPU to access it
-    ///
-    /// # Panics
-    ///
-    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
-    ///
-    /// # Errors
-    ///
-    /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
-    /// fails.
-    pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
+    fn memory_map(&self) -> Result<(usize, *mut u8), MapError> {
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
         let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
@@ -113,181 +103,204 @@ impl DmaBuf {
         })?;
 
         debug!("Memory Mapping Done");
+        
+        Ok((len, mapping_ptr))
+    }
 
-        Ok(MappedDmaBuf {
-            buf: self,
-            len,
-            mmap: mapping_ptr,
-        })
+    /// Maps a `DmaBuf` for the CPU to access it read-
+    ///
+    /// DMA-Buf [requires the user-space](https://docs.kernel.org/driver-api/dma-buf.html#cpu-access-to-dma-buffer-objects) to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
+    /// CPU access to a buffer in order to maintain the cache coherency. 
+    ///
+    /// # Panics
+    ///
+    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
+    /// fails.
+    pub fn memory_map_ro(&self) -> Result<MappedDmaBufRo<'_>, MapError> {
+        let (len, mapping_ptr) = self.memory_map()?;
+        MappedDmaBufRo::new(self, len, mapping_ptr)
+    }
+
+    /// Maps a `DmaBuf` for the CPU to access it read-write
+    ///
+    /// DMA-Buf [requires the user-space](https://docs.kernel.org/driver-api/dma-buf.html#cpu-access-to-dma-buffer-objects) to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
+    /// CPU access to a buffer in order to maintain the cache coherency. 
+    ///
+    /// # Panics
+    ///
+    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
+    /// fails.
+    pub fn memory_map_rw(&mut self) -> Result<MappedDmaBufRw<'_>, MapError> {
+        let (len, mapping_ptr) = self.memory_map()?;
+        MappedDmaBufRw::new(self, len, mapping_ptr)
+    }
+    
+    /// Maps a `DmaBuf` for the CPU to access it write-only
+    ///
+    /// DMA-Buf [requires the user-space](https://docs.kernel.org/driver-api/dma-buf.html#cpu-access-to-dma-buffer-objects) to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
+    /// CPU access to a buffer in order to maintain the cache coherency. 
+    ///
+    /// # Panics
+    ///
+    /// If the buffer size reported by the kernel (`i64`) cannot fit into an `usize`.
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
+    /// fails.
+    pub fn memory_map_wo(&mut self) -> Result<MappedDmaBufWo<'_>, MapError> {
+        let (len, mapping_ptr) = self.memory_map()?;
+        MappedDmaBufWo::new(self, len, mapping_ptr)
     }
 }
 
-/// A `DmaBuf` mapped in memory
-pub struct MappedDmaBuf {
-    buf: DmaBuf,
+/// A `DmaBuf` mapped in memory.
+///
+/// This uses an arbitrary T, even though the only 2 types possible are &DmaBuf and &mut DmaBuf, but Rust doesn't provide a generic over mutability.
+///
+/// The mutability makes a difference with &DmaBuf: that one can be mapped multiple times in independent places.
+struct MappedDmaBuf<T> {
+    buf: T,
     len: usize,
     mmap: *mut u8,
 }
 
-/// Error type to access a [`MappedDmaBuf`]
-#[derive(Debug, thiserror::Error)]
-pub enum BufferError {
-    /// An Error occured while accessing the buffer file descriptor
-    #[error("Could not access the buffer: {reason}")]
-    FdAccess {
-        /// Description of the Error
-        reason: String,
+/// A read-only Dmabuf mapped in memory. The underlying data gets cache-synced on creation and destruction.
+#[derive(Debug)]
+pub struct MappedDmaBufRo<'a>(MappedDmaBuf<&'a DmaBuf>);
 
-        /// Source of the Error
-        source: std::io::Error,
-    },
+/// A read-write Dmabuf mapped in memory. The underlying data gets cache-synced on creation and destruction.
+#[derive(Debug)]
+pub struct MappedDmaBufRw<'a>(MappedDmaBuf<&'a mut DmaBuf>);
 
-    /// An Error occured in the closure
-    #[error("The closure returned an error: {0}")]
-    Closure(Box<dyn std::error::Error>),
-}
+/// A write-only Dmabuf mapped in memory. The underlying data gets cache-synced on creation and destruction.
+#[derive(Debug)]
+pub struct MappedDmaBufWo<'a>(MappedDmaBuf<&'a mut DmaBuf>);
 
-impl MappedDmaBuf {
+
+impl<T: AsFd> MappedDmaBuf<T> {
     fn as_slice(&self) -> &[u8] {
         // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
         // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
         // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
         unsafe { slice::from_raw_parts(self.mmap, self.len) }
     }
+}
 
+impl MappedDmaBuf<&'_ mut DmaBuf> {
     fn as_slice_mut(&mut self) -> &mut [u8] {
         // SAFETY: We know that the pointer is valid, and the buffer length is at least equal to
         // self.len bytes. The backing buffer won't be mutated by the kernel, our structure is the
         // sole owner of the pointer, and it won't be mutated in our code either, so we're safe.
         unsafe { slice::from_raw_parts_mut(self.mmap, self.len) }
     }
+}
 
-    /// Calls a closure to read the buffer content
-    ///
-    /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
-    /// CPU access to a buffer in order to maintain the cache coherency. The closure will be run
-    /// with those primitives called for a read access from the CPU.
-    ///
-    /// The result of the closure will be returned.
-    ///
-    /// # Errors
-    ///
-    /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, BufferError>
-    where
-        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
-    {
+impl<'a> MappedDmaBufRo<'a> {
+    fn new(buf: &'a DmaBuf, len: usize, mapping_ptr: *mut u8) -> Result<Self, MapError> {
         debug!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(self.buf.as_fd())?;
+        dma_buf_begin_cpu_read_access(buf.as_fd())?;
 
-        debug!("Accessing the buffer");
-
-        let ret = {
-            let bytes = self.as_slice();
-
-            f(bytes, arg)
-                .map(|v| {
-                    debug!("Closure done without error");
-                    v
-                })
-                .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        };
-
-        dma_buf_end_cpu_read_access(self.buf.as_fd())?;
-
-        debug!("Buffer access done");
-
-        ret
+        Ok(Self(MappedDmaBuf {
+            buf,
+            len,
+            mmap: mapping_ptr,
+        }))
     }
-
-    /// Calls a closure to read from and write to the buffer content
-    ///
-    /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
-    /// CPU access to a buffer in order to maintain the cache coherency. The closure will be run
-    /// with those primitives called for a read and write access from the CPU.
-    ///
-    /// The result of the closure will be returned on success. On failure, the closure must return
-    /// `Error::Closure`
-    ///
-    /// # Errors
-    ///
-    /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, BufferError>
-    where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
-    {
-        debug!("Preparing the buffer for read/write access");
-
-        dma_buf_begin_cpu_readwrite_access(self.buf.as_fd())?;
-
-        debug!("Accessing the buffer");
-
-        let ret = {
-            let bytes = self.as_slice_mut();
-
-            f(bytes, arg)
-                .map(|v| {
-                    debug!("Closure done without error");
-                    v
-                })
-                .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        };
-
-        dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
-
-        debug!("Buffer access done");
-
-        ret
-    }
-
-    /// Calls a closure to read from and write to the buffer content
-    ///
-    /// DMA-Buf requires the user-space to call the `DMA_BUF_IOCTL_SYNC` ioctl before and after any
-    /// CPU access to a buffer in order to maintain the cache coherency. The closure will be run
-    /// with those primitives called for a read and write access from the CPU.
-    ///
-    /// The closure must return () on success. On failure, the closure must return `Error::Closure`.
-    ///
-    /// # Errors
-    ///
-    /// Will return [Error] if the underlying ioctl or the closure fails
-    pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), BufferError>
-    where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
-    {
-        debug!("Preparing the buffer for write access");
-
-        dma_buf_begin_cpu_write_access(self.buf.as_fd())?;
-
-        debug!("Accessing the buffer");
-
-        let ret = {
-            let bytes = self.as_slice_mut();
-
-            f(bytes, arg)
-                .map(|()| {
-                    debug!("Closure done without error");
-                })
-                .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        };
-
-        dma_buf_end_cpu_write_access(self.buf.as_fd())?;
-
-        debug!("Buffer access done");
-
-        ret
+    
+    /// Access the underlying data directly
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
+
+// maybe TODO: implement a manual .release(self) -> Result<(), Self> which passes the failure to the caller.
+impl Drop for MappedDmaBufRo<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = dma_buf_end_cpu_read_access(self.0.buf.as_fd()) {
+            warn!("End read access failed: {}", e);
+        }
+
+        debug!("Buffer access done");
+    }
+}
+
+impl<'a> MappedDmaBufRw<'a> {
+    fn new(buf: &'a mut DmaBuf, len: usize, mapping_ptr: *mut u8) -> Result<Self, MapError> {
+        debug!("Preparing the buffer for read/write access");
+
+        dma_buf_begin_cpu_readwrite_access(buf.as_fd())?;
+
+        Ok(Self(MappedDmaBuf {
+            buf,
+            len,
+            mmap: mapping_ptr,
+        }))
+    }
+    
+    /// Access the underlying data directly
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+    
+    /// Access the underlying data mutably
+    pub fn as_slice_mut(&mut self) -> &mut [u8] {
+        self.0.as_slice_mut()
+    }
+}
+
+impl Drop for MappedDmaBufRw<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = dma_buf_end_cpu_readwrite_access(self.0.buf.as_fd()) {
+            warn!("End read|write access failed: {}", e);
+        }
+
+        debug!("Buffer access done");
+    }
+}
+
+
+impl<'a> MappedDmaBufWo<'a> {
+    fn new(buf: &'a mut DmaBuf, len: usize, mapping_ptr: *mut u8) -> Result<Self, MapError> {
+        debug!("Preparing the buffer for write access");
+
+        dma_buf_begin_cpu_write_access(buf.as_fd())?;
+
+        Ok(Self(MappedDmaBuf {
+            buf,
+            len,
+            mmap: mapping_ptr,
+        }))
+    }
+    
+    /// Access the underlying data mutably.
+    ///
+    /// Data in this struct is cache-coherently guarded only for write access, so reading may give unexpected results.
+    pub fn as_slice_mut(&mut self) -> &mut [u8] {
+        self.0.as_slice_mut()
+    }
+}
+
+// maybe TODO: implement a manual .release(self) -> Result<(), Self> which passes the failure to the caller.
+impl Drop for MappedDmaBufWo<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = dma_buf_end_cpu_write_access(self.0.buf.as_fd()) {
+            warn!("End write access failed: {}", e);
+        }
+
+        debug!("Buffer access done");
+    }
+}
+
 
 impl From<OwnedFd> for DmaBuf {
     fn from(owned: OwnedFd) -> Self {
@@ -307,18 +320,6 @@ impl AsRawFd for DmaBuf {
     }
 }
 
-impl AsFd for MappedDmaBuf {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.buf.as_fd()
-    }
-}
-
-impl AsRawFd for MappedDmaBuf {
-    fn as_raw_fd(&self) -> RawFd {
-        self.buf.as_raw_fd()
-    }
-}
-
 impl FromRawFd for DmaBuf {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug!("Importing DMABuf from File Descriptor {}", fd);
@@ -329,7 +330,7 @@ impl FromRawFd for DmaBuf {
     }
 }
 
-impl fmt::Debug for MappedDmaBuf {
+impl<T: fmt::Debug> fmt::Debug for MappedDmaBuf<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MappedDmaBuf")
             .field("DmaBuf", &self.buf)
@@ -339,8 +340,9 @@ impl fmt::Debug for MappedDmaBuf {
     }
 }
 
-impl Drop for MappedDmaBuf {
+impl<T> Drop for MappedDmaBuf<T> {
     fn drop(&mut self) {
+        debug!("Unmapping");
         // SAFETY: It's not clear what rustix expects from a safety perspective, but our pointer is
         // valid, and is a void pointer at least.
         if unsafe { munmap(self.mmap.cast::<c_void>(), self.len) }.is_err() {
