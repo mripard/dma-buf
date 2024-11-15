@@ -350,3 +350,18 @@ impl<T> Drop for MappedDmaBuf<T> {
         }
     }
 }
+
+
+/// This module exists only to make tests compile.
+pub mod test {
+    use super::*;
+
+    /// Panics. Use for testing compilation.
+    pub fn get_dma_buf() -> &'static DmaBuf {
+        unimplemented!();
+    }
+    /// Panics. Use for testing compilation.
+    pub fn get_dma_buf_mut() -> &'static mut DmaBuf {
+        unimplemented!();
+    }
+}
