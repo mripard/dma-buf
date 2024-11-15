@@ -7,9 +7,13 @@ This library provides a safe abstraction over this interface for Rust.
 
 ## Basic usage
 
-```
+```should_panic()
+
 use dma_buf::DmaBuf;
 use dma_buf::test;
+
+// This test uses a stub device, always panicking.
+// It's up to you to find a working buffer.
 let buf: &DmaBuf = test::get_dma_buf();
 
 {
