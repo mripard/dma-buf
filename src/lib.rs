@@ -30,7 +30,7 @@ use rustix::{
     mm::{mmap, munmap, MapFlags, ProtFlags},
     param::page_size,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace, trace_span, warn};
 
 mod ioctl;
 use ioctl::{
@@ -179,7 +179,8 @@ impl MappedDmaBuf {
     {
         trace!("Preparing the buffer for read access");
 
-        dma_buf_begin_cpu_read_access(self.buf.as_fd())?;
+        trace_span!("dma-buf begin access ioctl")
+            .in_scope(|| dma_buf_begin_cpu_read_access(self.buf.as_fd()))?;
 
         trace!("Accessing the buffer");
 
@@ -194,7 +195,8 @@ impl MappedDmaBuf {
                 })
         };
 
-        dma_buf_end_cpu_read_access(self.buf.as_fd())?;
+        trace_span!("dma-buf end access ioctl")
+            .in_scope(|| dma_buf_end_cpu_read_access(self.buf.as_fd()))?;
 
         trace!("Buffer access done");
 
@@ -219,7 +221,8 @@ impl MappedDmaBuf {
     {
         trace!("Preparing the buffer for read/write access");
 
-        dma_buf_begin_cpu_readwrite_access(self.buf.as_fd())?;
+        trace_span!("dma-buf begin access ioctl")
+            .in_scope(|| dma_buf_begin_cpu_readwrite_access(self.buf.as_fd()))?;
 
         trace!("Accessing the buffer");
 
@@ -234,7 +237,8 @@ impl MappedDmaBuf {
                 })
         };
 
-        dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
+        trace_span!("dma-buf end access ioctl")
+            .in_scope(|| dma_buf_end_cpu_readwrite_access(self.buf.as_fd()))?;
 
         trace!("Buffer access done");
 
@@ -258,7 +262,8 @@ impl MappedDmaBuf {
     {
         trace!("Preparing the buffer for write access");
 
-        dma_buf_begin_cpu_write_access(self.buf.as_fd())?;
+        trace_span!("dma-buf begin access ioctl")
+            .in_scope(|| dma_buf_begin_cpu_write_access(self.buf.as_fd()))?;
 
         trace!("Accessing the buffer");
 
@@ -273,7 +278,8 @@ impl MappedDmaBuf {
                 })
         };
 
-        dma_buf_end_cpu_write_access(self.buf.as_fd())?;
+        trace_span!("dma-buf end access ioctl")
+            .in_scope(|| dma_buf_end_cpu_write_access(self.buf.as_fd()))?;
 
         trace!("Buffer access done");
 
