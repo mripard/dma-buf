@@ -25,7 +25,7 @@
 use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use rustix::{
     fs::fstat,
     mm::{mmap, munmap, MapFlags, ProtFlags},
@@ -92,7 +92,7 @@ impl DmaBuf {
         })?;
 
         let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
-        debug!("Valid buffer, size {len}");
+        trace!("Valid buffer, size {len}");
 
         // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
         // our fd is valid and the length is aligned, so that's something.
@@ -112,7 +112,7 @@ impl DmaBuf {
             source: std::io::Error::from(e),
         })?;
 
-        debug!("Memory Mapping Done");
+        trace!("Memory Mapping Done");
 
         Ok(MappedDmaBuf {
             buf: self,
@@ -177,11 +177,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
-        debug!("Preparing the buffer for read access");
+        trace!("Preparing the buffer for read access");
 
         dma_buf_begin_cpu_read_access(self.buf.as_fd())?;
 
-        debug!("Accessing the buffer");
+        trace!("Accessing the buffer");
 
         let ret = {
             let bytes = self.as_slice();
@@ -189,14 +189,14 @@ impl MappedDmaBuf {
             f(bytes, arg)
                 .inspect(|_| debug!("Closure done without error"))
                 .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
+                    warn!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
                 })
         };
 
         dma_buf_end_cpu_read_access(self.buf.as_fd())?;
 
-        debug!("Buffer access done");
+        trace!("Buffer access done");
 
         ret
     }
@@ -217,11 +217,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
-        debug!("Preparing the buffer for read/write access");
+        trace!("Preparing the buffer for read/write access");
 
         dma_buf_begin_cpu_readwrite_access(self.buf.as_fd())?;
 
-        debug!("Accessing the buffer");
+        trace!("Accessing the buffer");
 
         let ret = {
             let bytes = self.as_slice_mut();
@@ -229,14 +229,14 @@ impl MappedDmaBuf {
             f(bytes, arg)
                 .inspect(|_| debug!("Closure done without error"))
                 .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
+                    warn!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
                 })
         };
 
         dma_buf_end_cpu_readwrite_access(self.buf.as_fd())?;
 
-        debug!("Buffer access done");
+        trace!("Buffer access done");
 
         ret
     }
@@ -256,11 +256,11 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn core::error::Error>>,
     {
-        debug!("Preparing the buffer for write access");
+        trace!("Preparing the buffer for write access");
 
         dma_buf_begin_cpu_write_access(self.buf.as_fd())?;
 
-        debug!("Accessing the buffer");
+        trace!("Accessing the buffer");
 
         let ret = {
             let bytes = self.as_slice_mut();
@@ -268,14 +268,14 @@ impl MappedDmaBuf {
             f(bytes, arg)
                 .inspect(|()| debug!("Closure done without error"))
                 .map_err(|e| {
-                    debug!("Closure encountered an error {}", e);
+                    warn!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
                 })
         };
 
         dma_buf_end_cpu_write_access(self.buf.as_fd())?;
 
-        debug!("Buffer access done");
+        trace!("Buffer access done");
 
         ret
     }
