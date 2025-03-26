@@ -30,7 +30,7 @@ use rustix::{
     mm::{mmap, munmap, MapFlags, ProtFlags},
     param::page_size,
 };
-use tracing::{debug, trace, trace_span, warn};
+use tracing::{debug, debug_span, trace, trace_span, warn};
 
 mod ioctl;
 use ioctl::{
@@ -184,7 +184,7 @@ impl MappedDmaBuf {
 
         trace!("Accessing the buffer");
 
-        let ret = {
+        let ret = debug_span!("Closure Execution").in_scope(|| {
             let bytes = self.as_slice();
 
             f(bytes, arg)
@@ -193,7 +193,7 @@ impl MappedDmaBuf {
                     warn!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
                 })
-        };
+        });
 
         trace_span!("dma-buf end access ioctl")
             .in_scope(|| dma_buf_end_cpu_read_access(self.buf.as_fd()))?;
@@ -226,16 +226,12 @@ impl MappedDmaBuf {
 
         trace!("Accessing the buffer");
 
-        let ret = {
+        let ret = debug_span!("Closure Execution").in_scope(|| {
             let bytes = self.as_slice_mut();
 
             f(bytes, arg)
                 .inspect(|_| debug!("Closure done without error"))
-                .map_err(|e| {
-                    warn!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        };
+        });
 
         trace_span!("dma-buf end access ioctl")
             .in_scope(|| dma_buf_end_cpu_readwrite_access(self.buf.as_fd()))?;
@@ -267,7 +263,7 @@ impl MappedDmaBuf {
 
         trace!("Accessing the buffer");
 
-        let ret = {
+        let ret = debug_span!("Closure Execution").in_scope(|| {
             let bytes = self.as_slice_mut();
 
             f(bytes, arg)
@@ -276,7 +272,7 @@ impl MappedDmaBuf {
                     warn!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
                 })
-        };
+        });
 
         trace_span!("dma-buf end access ioctl")
             .in_scope(|| dma_buf_end_cpu_write_access(self.buf.as_fd()))?;
