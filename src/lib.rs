@@ -25,12 +25,12 @@
 use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
-use log::{debug, trace, warn};
 use rustix::{
     fs::fstat,
     mm::{mmap, munmap, MapFlags, ProtFlags},
     param::page_size,
 };
+use tracing::{debug, trace, warn};
 
 mod ioctl;
 use ioctl::{
