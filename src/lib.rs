@@ -144,7 +144,7 @@ pub enum BufferError {
 
     /// An Error occured in the closure
     #[error("The closure returned an error: {0}")]
-    Closure(Box<dyn std::error::Error>),
+    Closure(Box<dyn core::error::Error>),
 }
 
 impl MappedDmaBuf {
@@ -175,7 +175,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
         debug!("Preparing the buffer for read access");
 
@@ -187,10 +187,7 @@ impl MappedDmaBuf {
             let bytes = self.as_slice();
 
             f(bytes, arg)
-                .map(|v| {
-                    debug!("Closure done without error");
-                    v
-                })
+                .inspect(|_| debug!("Closure done without error"))
                 .map_err(|e| {
                     debug!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
@@ -218,7 +215,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn std::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
         debug!("Preparing the buffer for read/write access");
 
@@ -230,10 +227,7 @@ impl MappedDmaBuf {
             let bytes = self.as_slice_mut();
 
             f(bytes, arg)
-                .map(|v| {
-                    debug!("Closure done without error");
-                    v
-                })
+                .inspect(|_| debug!("Closure done without error"))
                 .map_err(|e| {
                     debug!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
@@ -260,7 +254,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn std::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn core::error::Error>>,
     {
         debug!("Preparing the buffer for write access");
 
@@ -272,9 +266,7 @@ impl MappedDmaBuf {
             let bytes = self.as_slice_mut();
 
             f(bytes, arg)
-                .map(|()| {
-                    debug!("Closure done without error");
-                })
+                .inspect(|()| debug!("Closure done without error"))
                 .map_err(|e| {
                     debug!("Closure encountered an error {}", e);
                     BufferError::Closure(e)
