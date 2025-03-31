@@ -177,30 +177,26 @@ impl MappedDmaBuf {
     where
         F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
-        trace!("Preparing the buffer for read access");
+        trace_span!("Buffer Read Access").in_scope(|| {
+            trace_span!("dma-buf begin access ioctl")
+                .in_scope(|| dma_buf_begin_cpu_read_access(self.buf.as_fd()))?;
 
-        trace_span!("dma-buf begin access ioctl")
-            .in_scope(|| dma_buf_begin_cpu_read_access(self.buf.as_fd()))?;
+            let ret = debug_span!("Closure Execution").in_scope(|| {
+                let bytes = self.as_slice();
 
-        trace!("Accessing the buffer");
+                f(bytes, arg)
+                    .inspect(|_| debug!("Closure done without error"))
+                    .map_err(|e| {
+                        warn!("Closure encountered an error {}", e);
+                        BufferError::Closure(e)
+                    })
+            });
 
-        let ret = debug_span!("Closure Execution").in_scope(|| {
-            let bytes = self.as_slice();
+            trace_span!("dma-buf end access ioctl")
+                .in_scope(|| dma_buf_end_cpu_read_access(self.buf.as_fd()))?;
 
-            f(bytes, arg)
-                .inspect(|_| debug!("Closure done without error"))
-                .map_err(|e| {
-                    warn!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        });
-
-        trace_span!("dma-buf end access ioctl")
-            .in_scope(|| dma_buf_end_cpu_read_access(self.buf.as_fd()))?;
-
-        trace!("Buffer access done");
-
-        ret
+            ret
+        })
     }
 
     /// Calls a closure to read from and write to the buffer content
@@ -219,26 +215,26 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
     {
-        trace!("Preparing the buffer for read/write access");
+        trace_span!("Buffer Read / Write Access").in_scope(|| {
+            trace_span!("dma-buf begin access ioctl")
+                .in_scope(|| dma_buf_begin_cpu_readwrite_access(self.buf.as_fd()))?;
 
-        trace_span!("dma-buf begin access ioctl")
-            .in_scope(|| dma_buf_begin_cpu_readwrite_access(self.buf.as_fd()))?;
+            let ret = debug_span!("Closure Execution").in_scope(|| {
+                let bytes = self.as_slice_mut();
 
-        trace!("Accessing the buffer");
+                f(bytes, arg)
+                    .inspect(|_| debug!("Closure done without error"))
+                    .map_err(|e| {
+                        warn!("Closure encountered an error {}", e);
+                        BufferError::Closure(e)
+                    })
+            });
 
-        let ret = debug_span!("Closure Execution").in_scope(|| {
-            let bytes = self.as_slice_mut();
+            trace_span!("dma-buf end access ioctl")
+                .in_scope(|| dma_buf_end_cpu_readwrite_access(self.buf.as_fd()))?;
 
-            f(bytes, arg)
-                .inspect(|_| debug!("Closure done without error"))
-        });
-
-        trace_span!("dma-buf end access ioctl")
-            .in_scope(|| dma_buf_end_cpu_readwrite_access(self.buf.as_fd()))?;
-
-        trace!("Buffer access done");
-
-        ret
+            ret
+        })
     }
 
     /// Calls a closure to read from and write to the buffer content
@@ -256,30 +252,26 @@ impl MappedDmaBuf {
     where
         F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn core::error::Error>>,
     {
-        trace!("Preparing the buffer for write access");
+        trace_span!("Buffer Write Access").in_scope(|| {
+            trace_span!("dma-buf begin access ioctl")
+                .in_scope(|| dma_buf_begin_cpu_write_access(self.buf.as_fd()))?;
 
-        trace_span!("dma-buf begin access ioctl")
-            .in_scope(|| dma_buf_begin_cpu_write_access(self.buf.as_fd()))?;
+            let ret = debug_span!("Closure Execution").in_scope(|| {
+                let bytes = self.as_slice_mut();
 
-        trace!("Accessing the buffer");
+                f(bytes, arg)
+                    .inspect(|()| debug!("Closure done without error"))
+                    .map_err(|e| {
+                        warn!("Closure encountered an error {}", e);
+                        BufferError::Closure(e)
+                    })
+            });
 
-        let ret = debug_span!("Closure Execution").in_scope(|| {
-            let bytes = self.as_slice_mut();
+            trace_span!("dma-buf end access ioctl")
+                .in_scope(|| dma_buf_end_cpu_write_access(self.buf.as_fd()))?;
 
-            f(bytes, arg)
-                .inspect(|()| debug!("Closure done without error"))
-                .map_err(|e| {
-                    warn!("Closure encountered an error {}", e);
-                    BufferError::Closure(e)
-                })
-        });
-
-        trace_span!("dma-buf end access ioctl")
-            .in_scope(|| dma_buf_end_cpu_write_access(self.buf.as_fd()))?;
-
-        trace!("Buffer access done");
-
-        ret
+            ret
+        })
     }
 }
 
