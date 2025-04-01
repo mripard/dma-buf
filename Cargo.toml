@@ -11,7 +11,7 @@ categories = ["api-bindings", "os::linux-apis"]
 repository = "https://github.com/mripard/dma-buf/"
 
 [dependencies]
-rustix = { version = "0.38.31", features = ["fs", "mm", "param"] }
+rustix = { version = "1.0.5", features = ["fs", "mm", "param"] }
 thiserror = "2.0.3"
 tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 
