@@ -2,7 +2,7 @@ use std::os::fd::BorrowedFd;
 
 use rustix::{
     io::Errno,
-    ioctl::{ioctl, Setter, WriteOpcode},
+    ioctl::{ioctl, opcode, Setter},
 };
 
 use crate::BufferError;
@@ -22,13 +22,13 @@ struct dma_buf_sync {
 }
 
 fn dma_buf_sync_ioctl(fd: BorrowedFd<'_>, flags: u64) -> Result<(), Errno> {
-    type Opcode = WriteOpcode<DMA_BUF_BASE, DMA_BUF_IOCTL_SYNC, dma_buf_sync>;
-
     let sync = dma_buf_sync { flags };
 
     // SAFETY: This function is unsafe because the opcode has to be valid, and the value type must
     // match. We have checked those, so we're good.
-    let ioctl_type = unsafe { Setter::<Opcode, dma_buf_sync>::new(sync) };
+    let ioctl_type = unsafe {
+        Setter::<{ opcode::write::<dma_buf_sync>(DMA_BUF_BASE, DMA_BUF_IOCTL_SYNC) }, dma_buf_sync>::new(sync)
+    };
 
     // SAFETY: This function is unsafe because the driver isn't guaranteed to implement the ioctl,
     // and to implement it properly. We don't have much of a choice and still have to trust the
