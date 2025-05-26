@@ -2,6 +2,7 @@
 // Licensed under the MIT License
 // See the LICENSE file or <http://opensource.org/licenses/MIT>
 
+#![allow(unsafe_code)]
 #![cfg_attr(
     feature = "nightly",
     feature(
@@ -22,8 +23,11 @@
 )]
 #![doc = include_str!("../README.md")]
 
-use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use core::{error, ffi::c_void, fmt, ptr, slice};
+use std::{
+    io,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
+};
 
 use rustix::{
     fs::fstat,
@@ -38,35 +42,6 @@ use ioctl::{
     dma_buf_begin_cpu_write_access, dma_buf_end_cpu_read_access, dma_buf_end_cpu_readwrite_access,
     dma_buf_end_cpu_write_access,
 };
-
-/// Error type to map a [`DmaBuf`]
-#[non_exhaustive]
-#[derive(thiserror::Error, Debug)]
-pub enum MapError {
-    /// An Error occurred while accessing the buffer file descriptor
-    #[error("Could not access the buffer file descriptor: {reason}")]
-    FdAccess {
-        /// Description of the Error
-        reason: String,
-
-        /// Source of the Error
-        source: std::io::Error,
-    },
-
-    /// An Error occurred while mapping the buffer file descriptor
-    #[error("Could not map the buffer file descriptor: {reason}")]
-    MappingFailed {
-        /// Description of the Error
-        reason: String,
-
-        /// Source of the Error
-        source: std::io::Error,
-    },
-
-    /// An Error occurred while converting between Integer types
-    #[error("Integer Conversion Error")]
-    IntegerConversionFailed(#[from] TryFromIntError),
-}
 
 /// A DMA-Buf buffer
 #[derive(Debug)]
@@ -83,15 +58,16 @@ impl DmaBuf {
     ///
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
-    pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "The kernel doesn't use the same types between stat and munmap, but it's not something one can recover from."
+    )]
+    pub fn memory_map(self) -> io::Result<MappedDmaBuf> {
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
-        let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
-            reason: e.to_string(),
-            source: std::io::Error::from(e),
-        })?;
-
-        let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
+        let len = usize::try_from(fstat(&self.0)?.st_size)
+            .expect("Buffer size can't fit into mmap argument length")
+            .next_multiple_of(page_size());
         trace!("Valid buffer, size {len}");
 
         // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
@@ -106,11 +82,7 @@ impl DmaBuf {
                 0,
             )
         }
-        .map(<*mut c_void>::cast::<u8>)
-        .map_err(|e| MapError::MappingFailed {
-            reason: e.to_string(),
-            source: std::io::Error::from(e),
-        })?;
+        .map(<*mut c_void>::cast::<u8>)?;
 
         trace!("Memory Mapping Done");
 
@@ -130,21 +102,41 @@ pub struct MappedDmaBuf {
 }
 
 /// Error type to access a [`MappedDmaBuf`]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum BufferError {
     /// An Error occured while accessing the buffer file descriptor
-    #[error("Could not access the buffer: {reason}")]
     FdAccess {
         /// Description of the Error
         reason: String,
 
         /// Source of the Error
-        source: std::io::Error,
+        source: io::Error,
     },
 
     /// An Error occured in the closure
-    #[error("The closure returned an error: {0}")]
-    Closure(Box<dyn core::error::Error>),
+    Closure(Box<dyn error::Error>),
+}
+
+impl fmt::Display for BufferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BufferError::FdAccess { reason, .. } => {
+                f.write_fmt(format_args!("Could not access the buffer: {reason}"))
+            }
+            BufferError::Closure(error) => {
+                f.write_fmt(format_args!("The closure returned an error: {error}"))
+            }
+        }
+    }
+}
+
+impl error::Error for BufferError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            BufferError::FdAccess { source, .. } => Some(source),
+            BufferError::Closure(error) => Some(error.as_ref()),
+        }
+    }
 }
 
 impl MappedDmaBuf {
@@ -175,7 +167,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn error::Error>>,
     {
         trace_span!("Buffer Read Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
@@ -213,7 +205,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn error::Error>>,
     {
         trace_span!("Buffer Read / Write Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
@@ -250,7 +242,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn core::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn error::Error>>,
     {
         trace_span!("Buffer Write Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
