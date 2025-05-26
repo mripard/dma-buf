@@ -102,10 +102,9 @@ pub struct MappedDmaBuf {
 }
 
 /// Error type to access a [`MappedDmaBuf`]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum BufferError {
     /// An Error occured while accessing the buffer file descriptor
-    #[error("Could not access the buffer: {reason}")]
     FdAccess {
         /// Description of the Error
         reason: String,
@@ -115,8 +114,29 @@ pub enum BufferError {
     },
 
     /// An Error occured in the closure
-    #[error("The closure returned an error: {0}")]
     Closure(Box<dyn error::Error>),
+}
+
+impl fmt::Display for BufferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BufferError::FdAccess { reason, .. } => {
+                f.write_fmt(format_args!("Could not access the buffer: {reason}"))
+            }
+            BufferError::Closure(error) => {
+                f.write_fmt(format_args!("The closure returned an error: {error}"))
+            }
+        }
+    }
+}
+
+impl error::Error for BufferError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            BufferError::FdAccess { source, .. } => Some(source),
+            BufferError::Closure(error) => Some(error.as_ref()),
+        }
+    }
 }
 
 impl MappedDmaBuf {
