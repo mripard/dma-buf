@@ -23,7 +23,7 @@
 )]
 #![doc = include_str!("../README.md")]
 
-use core::{error, ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
+use core::{error, ffi::c_void, fmt, ptr, slice};
 use std::{
     io,
     os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
@@ -43,35 +43,6 @@ use ioctl::{
     dma_buf_end_cpu_write_access,
 };
 
-/// Error type to map a [`DmaBuf`]
-#[non_exhaustive]
-#[derive(thiserror::Error, Debug)]
-pub enum MapError {
-    /// An Error occurred while accessing the buffer file descriptor
-    #[error("Could not access the buffer file descriptor: {reason}")]
-    FdAccess {
-        /// Description of the Error
-        reason: String,
-
-        /// Source of the Error
-        source: io::Error,
-    },
-
-    /// An Error occurred while mapping the buffer file descriptor
-    #[error("Could not map the buffer file descriptor: {reason}")]
-    MappingFailed {
-        /// Description of the Error
-        reason: String,
-
-        /// Source of the Error
-        source: io::Error,
-    },
-
-    /// An Error occurred while converting between Integer types
-    #[error("Integer Conversion Error")]
-    IntegerConversionFailed(#[from] TryFromIntError),
-}
-
 /// A DMA-Buf buffer
 #[derive(Debug)]
 pub struct DmaBuf(OwnedFd);
@@ -87,15 +58,16 @@ impl DmaBuf {
     ///
     /// Will return an error if either the Buffer's length can't be retrieved, or if the mmap call
     /// fails.
-    pub fn memory_map(self) -> Result<MappedDmaBuf, MapError> {
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "The kernel doesn't use the same types between stat and munmap, but it's not something one can recover from."
+    )]
+    pub fn memory_map(self) -> io::Result<MappedDmaBuf> {
         debug!("Mapping DMA-Buf buffer with File Descriptor {:#?}", self.0);
 
-        let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
-            reason: e.to_string(),
-            source: io::Error::from(e),
-        })?;
-
-        let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
+        let len = usize::try_from(fstat(&self.0)?.st_size)
+            .expect("Buffer size can't fit into mmap argument length")
+            .next_multiple_of(page_size());
         trace!("Valid buffer, size {len}");
 
         // SAFETY: It's unclear at this point what the exact safety requirements from mmap are, but
@@ -110,11 +82,7 @@ impl DmaBuf {
                 0,
             )
         }
-        .map(<*mut c_void>::cast::<u8>)
-        .map_err(|e| MapError::MappingFailed {
-            reason: e.to_string(),
-            source: io::Error::from(e),
-        })?;
+        .map(<*mut c_void>::cast::<u8>)?;
 
         trace!("Memory Mapping Done");
 
