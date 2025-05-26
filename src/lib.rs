@@ -23,8 +23,11 @@
 )]
 #![doc = include_str!("../README.md")]
 
-use core::{ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use core::{error, ffi::c_void, fmt, num::TryFromIntError, ptr, slice};
+use std::{
+    io,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
+};
 
 use rustix::{
     fs::fstat,
@@ -51,7 +54,7 @@ pub enum MapError {
         reason: String,
 
         /// Source of the Error
-        source: std::io::Error,
+        source: io::Error,
     },
 
     /// An Error occurred while mapping the buffer file descriptor
@@ -61,7 +64,7 @@ pub enum MapError {
         reason: String,
 
         /// Source of the Error
-        source: std::io::Error,
+        source: io::Error,
     },
 
     /// An Error occurred while converting between Integer types
@@ -89,7 +92,7 @@ impl DmaBuf {
 
         let stat = fstat(&self.0).map_err(|e| MapError::FdAccess {
             reason: e.to_string(),
-            source: std::io::Error::from(e),
+            source: io::Error::from(e),
         })?;
 
         let len = usize::try_from(stat.st_size)?.next_multiple_of(page_size());
@@ -110,7 +113,7 @@ impl DmaBuf {
         .map(<*mut c_void>::cast::<u8>)
         .map_err(|e| MapError::MappingFailed {
             reason: e.to_string(),
-            source: std::io::Error::from(e),
+            source: io::Error::from(e),
         })?;
 
         trace!("Memory Mapping Done");
@@ -140,12 +143,12 @@ pub enum BufferError {
         reason: String,
 
         /// Source of the Error
-        source: std::io::Error,
+        source: io::Error,
     },
 
     /// An Error occured in the closure
     #[error("The closure returned an error: {0}")]
-    Closure(Box<dyn core::error::Error>),
+    Closure(Box<dyn error::Error>),
 }
 
 impl MappedDmaBuf {
@@ -176,7 +179,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn read<A, F, R>(&self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
+        F: Fn(&[u8], Option<A>) -> Result<R, Box<dyn error::Error>>,
     {
         trace_span!("Buffer Read Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
@@ -214,7 +217,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn readwrite<A, F, R>(&mut self, f: F, arg: Option<A>) -> Result<R, BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn core::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<R, Box<dyn error::Error>>,
     {
         trace_span!("Buffer Read / Write Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
@@ -251,7 +254,7 @@ impl MappedDmaBuf {
     /// Will return [Error] if the underlying ioctl or the closure fails
     pub fn write<A, F>(&mut self, f: F, arg: Option<A>) -> Result<(), BufferError>
     where
-        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn core::error::Error>>,
+        F: Fn(&mut [u8], Option<A>) -> Result<(), Box<dyn error::Error>>,
     {
         trace_span!("Buffer Write Access").in_scope(|| {
             trace_span!("dma-buf begin access ioctl")
