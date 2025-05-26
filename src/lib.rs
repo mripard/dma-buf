@@ -2,6 +2,8 @@
 // Licensed under the MIT License
 // See the LICENSE file or <http://opensource.org/licenses/MIT>
 
+#![allow(unsafe_code)]
+
 #![cfg_attr(
     feature = "nightly",
     feature(
